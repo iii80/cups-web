@@ -58,10 +58,13 @@
           :printing="printing"
           :is-multi-image="isMultiImage"
           :total-size="multiImageTotalSize"
+          :gs-applying="gsApplying"
+          :gs-applied="gsApplied"
           @file-selected="processFile"
           @files-selected="processMultipleImages"
           @clear="clearFile"
           @convert="convertToPdf"
+          @apply-gs="applyGsNormalization"
           @print="uploadAndPrint"
         />
 
@@ -169,6 +172,9 @@ const downloadName = ref('')
 const selectedImages = ref([])
 const imageThumbnails = ref([])
 const fileDisplayName = ref('')
+// 是否对当前 PDF 应用了后端 gs 规范化（仅 PDF 上传后通过 UI 按钮显式触发）
+const gsApplying = ref(false)
+const gsApplied = ref(false)
 
 // ─── 打印参数 ─────────────────────────────────────────────
 const isColor = ref(true)
@@ -304,6 +310,8 @@ function clearFile() {
   selectedImages.value = []
   imageThumbnails.value = []
   fileDisplayName.value = ''
+  gsApplying.value = false
+  gsApplied.value = false
 }
 
 function processFile(f) {
@@ -313,48 +321,15 @@ function processFile(f) {
   downloadName.value = f.name.replace(/\.[^/.]+$/, '') + '.pdf'
 
   if (f.type === 'application/pdf') {
-    // PDF 预览：**直接等后端 /api/convert (normalizePDF / gs) 返回再设 previewUrl**。
-    //
-    // 之所以不再先挂本地原始 PDF 做"秒开"：一旦等 gs 处理完再换 blob URL，pdf.js
-    // 会重新 getDocument 一次，视觉上就会"闪一下"（原始字体 → gs 产物字体）。
-    // 改成同步等待就不会闪；代价是上传后 PDF 预览会晚 1~2 秒出来，期间用 converting
-    // loading 态覆盖（与 Office / OFD 上传的等待体验一致）。
-    //
-    // 打印字节流仍然是同一份 gs 产物，与预览完全一致。
-    //
-    // 竞态防护：捕获当前 selectedFile 引用，异步返回时比对；用户换/清了文件就丢弃结果。
-    converting.value = true
-    previewType.value = 'text'
-    textPreview.value = '正在处理 PDF，请稍候…'
-    ;(async () => {
-      let normalizedBlob = null
-      try {
-        const fd = new FormData()
-        fd.append('file', f, f.name)
-        const resp = await apiFetch('/api/convert', { method: 'POST', body: fd }, () => emit('logout'))
-        if (!resp.ok) {
-          console.warn('[preview] /api/convert 失败，回退到原始 PDF：', await readError(resp))
-        } else {
-          normalizedBlob = await resp.blob()
-        }
-      } catch (e) {
-        console.warn('[preview] /api/convert 异常，回退到原始 PDF：', e)
-      }
-      // 用户在 gs 处理期间换/清了文件，直接丢弃结果
-      if (selectedFile.value !== f) {
-        converting.value = false
-        return
-      }
-      // 成功用 gs 产物，失败兜底用原始 PDF，保证预览不至于白屏
-      const useBlob = normalizedBlob || f
-      clearPreviewUrl()
-      previewUrl.value = URL.createObjectURL(useBlob)
-      previewType.value = 'pdf'
-      textPreview.value = ''
-      pdfBlob.value = useBlob
-      converted.value = true
-      converting.value = false
-    })()
+    // 默认不再对上传 PDF 走 /api/convert (gs 规范化)：直接用原始字节做预览和打印，
+    // 上传即可秒开预览。如需修复 CJK 字体乱码等问题，用户可点击"应用 GS 规范化"
+    // 显式触发 applyGsNormalization()，把当前 PDF 替换为 gs 产物。
+    clearPreviewUrl()
+    previewUrl.value = URL.createObjectURL(f)
+    previewType.value = 'pdf'
+    textPreview.value = ''
+    pdfBlob.value = f
+    converted.value = true
   } else if (f.type.startsWith('image/') || /\.(heic|heif)$/i.test(f.name)) {
     if (isHeicImage(f)) {
       // HEIC/HEIF 浏览器无法原生解码，先提示"正在转换"，异步用 heic2any 转成 JPEG 再预览
@@ -582,6 +557,38 @@ async function convertToPdf() {
     toast.add({ title: '转换失败', description: e.message, color: 'error', icon: 'i-lucide-x-circle' })
   } finally {
     converting.value = false
+  }
+}
+
+// 对当前 PDF 显式应用后端 gs 规范化。
+// 后端 /api/convert?normalize=true 会把 PDF 重写为 1.4 版本并嵌入所有字体，
+// 用于修复 CJK 字体外挂 CMap 导致的乱码等问题。规范化结果替换 pdfBlob 与
+// previewUrl，后续打印发的就是这份字节流。
+async function applyGsNormalization() {
+  const f = selectedFile.value
+  if (!f || f.type !== 'application/pdf') return
+  if (gsApplying.value || gsApplied.value) return
+  gsApplying.value = true
+  try {
+    const fd = new FormData()
+    fd.append('file', f, f.name)
+    fd.append('normalize', 'true')
+    const resp = await apiFetch('/api/convert', { method: 'POST', body: fd }, () => emit('logout'))
+    if (!resp.ok) throw new Error(await readError(resp))
+    const blob = await resp.blob()
+    // 用户在期间换/清了文件，丢弃结果
+    if (selectedFile.value !== f) return
+    clearPreviewUrl()
+    previewUrl.value = URL.createObjectURL(blob)
+    previewType.value = 'pdf'
+    textPreview.value = ''
+    pdfBlob.value = blob
+    gsApplied.value = true
+    toast.add({ title: '已应用 GS 规范化', color: 'success', icon: 'i-lucide-check-circle' })
+  } catch (e) {
+    toast.add({ title: '应用 GS 失败', description: e.message, color: 'error', icon: 'i-lucide-x-circle' })
+  } finally {
+    gsApplying.value = false
   }
 }
 

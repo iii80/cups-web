@@ -68,6 +68,20 @@
             :loading="converting"
             @click="$emit('convert')"
           >{{ isMultiImage ? '合并' : '转 PDF' }}</UButton>
+          <!--
+            "应用 GS 规范化"按钮：仅在已上传 PDF 时显示。点击后调用
+            /api/convert?normalize=true 走 Ghostscript 重写 PDF（嵌入所有字体、统一为 1.4 版本），
+            用于修复 CJK 字体外挂 CMap 导致的乱码等问题。
+          -->
+          <UButton
+            v-if="isPdf"
+            variant="ghost"
+            size="xs"
+            :icon="gsApplied ? 'i-lucide-check-circle' : 'i-lucide-wand-2'"
+            :loading="gsApplying"
+            :disabled="gsApplied || gsApplying"
+            @click="$emit('apply-gs')"
+          >{{ gsApplied ? '已规范化' : '应用 GS 规范化' }}</UButton>
           <UButton
             v-if="converted && pdfBlob && previewUrl"
             variant="ghost"
@@ -84,7 +98,7 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import { formatFileSize } from '../../utils/format'
 
 const props = defineProps({
@@ -99,10 +113,14 @@ const props = defineProps({
   canPrint: { type: Boolean, default: false },
   printing: { type: Boolean, default: false },
   isMultiImage: { type: Boolean, default: false },
-  totalSize: { type: Number, default: 0 }
+  totalSize: { type: Number, default: 0 },
+  gsApplying: { type: Boolean, default: false },
+  gsApplied: { type: Boolean, default: false }
 })
 
-const emit = defineEmits(['file-selected', 'files-selected', 'clear', 'convert', 'print', 'download'])
+const emit = defineEmits(['file-selected', 'files-selected', 'clear', 'convert', 'apply-gs', 'print', 'download'])
+
+const isPdf = computed(() => props.selectedFile?.type === 'application/pdf')
 
 const isDragging = ref(false)
 const fileInput = ref(null)

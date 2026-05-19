@@ -71,20 +71,25 @@ func convertHandler(w http.ResponseWriter, r *http.Request) {
 	case fileKindOFD:
 		outPath, outCleanup, err = convertOFDToPDF(ctx, inPath)
 	case fileKindPDF:
-		// 预览路径也走 normalizePDF，确保预览与打印看到完全相同的字节流。
-		// gs pdfwrite 会将空壳 CID 字体重建为嵌入 TrueType 子集，
-		// 配合 pdf.js 的 CMap + 嵌入字体优先配置，渲染效果与打印一致。
-		diagnosePDF(inPath)
-		res, normErr := normalizePDF(ctx, inPath)
-		if normErr != nil {
-			err = normErr
-		} else {
-			outPath = res.OutputPath
-			if res.Cleanup != nil {
-				outCleanup = res.Cleanup
+		// 默认不再对上传 PDF 走 gs：客户端在 UI 点击"应用 GS 规范化"时
+		// 才会带上 normalize=true 显式触发，用于修复 CJK 字体乱码等问题。
+		// 否则原样回传，预览端使用原始字节，打印端也读同一份字节，预览/打印一致。
+		if r.FormValue("normalize") == "true" {
+			diagnosePDF(inPath)
+			res, normErr := normalizePDF(ctx, inPath)
+			if normErr != nil {
+				err = normErr
 			} else {
-				outCleanup = func() {}
+				outPath = res.OutputPath
+				if res.Cleanup != nil {
+					outCleanup = res.Cleanup
+				} else {
+					outCleanup = func() {}
+				}
 			}
+		} else {
+			outPath = inPath
+			outCleanup = func() {}
 		}
 	default:
 		outPath, outCleanup, err = convertOfficeToPDF(ctx, inPath)

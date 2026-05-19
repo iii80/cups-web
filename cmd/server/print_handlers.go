@@ -77,40 +77,19 @@ func printHandler(w http.ResponseWriter, r *http.Request) {
 	kind := detectFileKind(storedAbs, fh.Filename)
 	switch kind {
 	case fileKindPDF:
-		// PDF 标准化管线：诊断日志 → normalizePDF（gs / libreoffice / passthrough）→ 读页数
-		diagnosePDF(storedAbs)
-
-		normRes, nerr := normalizePDF(countCtx, storedAbs)
-		if nerr != nil {
-			log.Printf("[print] normalizePDF fatal: %v", nerr)
-		}
-		effectivePath := storedAbs
-		if normRes != nil {
-			effectivePath = normRes.OutputPath
-			if normRes.Method != "passthrough" {
-				// 将标准化后的 PDF 持久化到 uploads/ 下，命名为 <原文件>.print.pdf，
-				// 以便维护任务按保留天数一起清理；随后把打印路径切到该副本。
-				if _, convertedAbs, saveErr := saveConvertedPDFToUploads(normRes.OutputPath, storedRel, uploadDir); saveErr == nil {
-					effectivePath = convertedAbs
-				} else {
-					log.Printf("[print] save normalized pdf failed: %v", saveErr)
-				}
-			}
-			if normRes.Cleanup != nil {
-				printCleanup = normRes.Cleanup
-			}
-		}
-
+		// 默认不再对上传 PDF 走 gs 规范化，直接打印原始字节。
+		// 如客户端有需要（例如 CJK 字体乱码），可先调用 /api/convert?normalize=true
+		// 拿到规范化后的字节再回传到本接口。
 		var cerr error
-		pages, cerr = countPDFPages(effectivePath)
+		pages, cerr = countPDFPages(storedAbs)
 		if cerr != nil {
-			log.Printf("[print] countPDFPages failed (method=%s): %v", methodOf(normRes), cerr)
+			log.Printf("[print] countPDFPages failed: %v", cerr)
 			pages = 1
 		}
-		printPath = effectivePath
+		printPath = storedAbs
 		printMime = "application/pdf"
-		// passthrough 且页数仍无法读取时，MIME 降级为 octet-stream，让 CUPS/IPP 自行识别
-		if cerr != nil && normRes != nil && normRes.Method == "passthrough" {
+		// 解析失败时降级 MIME，让 CUPS/IPP 自行识别
+		if cerr != nil {
 			printMime = "application/octet-stream"
 		}
 	case fileKindOffice:
