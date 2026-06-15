@@ -224,7 +224,7 @@
             :paper-preview-style="paperPreviewStyle"
           />
         </div>
-        <PrintRecordList :records="printRecords" :loading="loadingRecords" @refresh="loadPrintRecords" />
+        <PrintRecordList ref="recordListRef" :records="printRecords" :loading="loadingRecords" :printers="printers" :current-printer="printer" @refresh="loadPrintRecords" @reprint="handleReprint" />
         <PrinterStatus :printer-info="printerInfo" :printer-uri="printer" :loading="loadingPrinterInfo" :error="printerInfoError" @refresh="loadPrinterInfo" />
       </div>
     </div>
@@ -308,6 +308,7 @@ const refreshing = ref(false)
 // ─── 打印记录 ─────────────────────────────────────────────
 const printRecords = ref([])
 const loadingRecords = ref(false)
+const recordListRef = ref(null)
 
 // ─── 打印机状态 ───────────────────────────────────────────
 const printerInfo = ref(null)
@@ -872,6 +873,39 @@ async function loadPrintRecords(silent = false) {
     console.error('加载打印记录失败', e)
   } finally {
     loadingRecords.value = false
+  }
+}
+
+async function handleReprint({ id, printer: reprintPrinter, duplex: reprintDuplex, color: reprintColor, copies: reprintCopies }) {
+  try {
+    const resp = await apiFetch(`/api/print-records/${id}/reprint`, {
+      method: 'POST',
+      body: JSON.stringify({
+        printer: reprintPrinter,
+        duplex: reprintDuplex,
+        color: reprintColor,
+        copies: reprintCopies,
+        orientation: orientation.value,
+        paperSize: paperSize.value,
+        paperType: paperType.value,
+        printScaling: printScaling.value
+      })
+    }, () => emit('logout'))
+    if (!resp.ok) {
+      throw new Error(await readError(resp))
+    }
+    const j = await resp.json()
+    toast.add({
+      title: '重新打印已提交',
+      description: `${j.pages} 页，任务ID：${j.jobId || '—'}`,
+      color: 'success',
+      icon: 'i-lucide-check-circle'
+    })
+    await loadPrintRecords()
+  } catch (e) {
+    toast.add({ title: '重新打印失败', description: e.message, color: 'error', icon: 'i-lucide-x-circle' })
+  } finally {
+    recordListRef.value?.clearReprintLoading()
   }
 }
 
