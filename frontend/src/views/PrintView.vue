@@ -190,6 +190,7 @@
           v-model:pageRange="pageRange"
           v-model:pageSet="pageSet"
           v-model:mirror="mirror"
+          v-model:watermarkText="watermarkText"
           :printing="printing"
         />
 
@@ -222,6 +223,7 @@
             :orientation-label="orientationLabel"
             :paper-dim-text="paperDimText"
             :paper-preview-style="paperPreviewStyle"
+            :watermark-text="watermarkText"
           />
         </div>
         <PrintRecordList ref="recordListRef" :records="printRecords" :loading="loadingRecords" :printers="printers" :current-printer="printer" @refresh="loadPrintRecords" @reprint="handleReprint" />
@@ -283,6 +285,7 @@ const printScaling = ref('fit')
 const pageRange = ref('')
 const pageSet = ref('all')
 const mirror = ref(false)
+const watermarkText = ref('')
 
 // ─── 打印模式 ─────────────────────────────────────────────
 const printMode = ref(localStorage.getItem('print_mode') || 'standard')
@@ -662,6 +665,7 @@ async function uploadAndPrintBatch() {
       if (pageRange.value.trim()) form.append('page_range', pageRange.value.trim())
       if (pageSet.value && pageSet.value !== 'all') form.append('page_set', pageSet.value)
       if (mirror.value) form.append('mirror', 'true')
+      if (watermarkText.value.trim()) form.append('watermark_text', watermarkText.value.trim())
 
       const resp = await apiFetch('/api/print', { method: 'POST', body: form }, () => emit('logout'))
       if (!resp.ok) throw new Error(await readError(resp))
@@ -830,6 +834,7 @@ async function uploadAndPrint() {
   if (pageRange.value.trim()) form.append('page_range', pageRange.value.trim())
   if (pageSet.value && pageSet.value !== 'all') form.append('page_set', pageSet.value)
   if (mirror.value) form.append('mirror', 'true')
+  if (watermarkText.value.trim()) form.append('watermark_text', watermarkText.value.trim())
 
   printing.value = true
   try {

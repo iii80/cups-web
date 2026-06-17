@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"cups-web/internal/auth"
@@ -62,6 +63,7 @@ func printHandler(w http.ResponseWriter, r *http.Request) {
 	pageRange := r.FormValue("page_range")
 	pageSet := r.FormValue("page_set")
 	mirror := r.FormValue("mirror") == "true"
+	watermarkText := strings.TrimSpace(r.FormValue("watermark_text"))
 
 	var saveHistory bool
 	if err := appStore.WithTx(r.Context(), true, func(tx *sql.Tx) error {
@@ -209,6 +211,16 @@ func printHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	if printCleanup != nil {
 		defer printCleanup()
+	}
+
+	if watermarkText != "" && printMime == "application/pdf" {
+		wmPath, wmCleanup, wmErr := applyWatermarkToPDF(printPath, watermarkText)
+		if wmErr != nil {
+			log.Printf("[print] watermark failed: %v", wmErr)
+		} else {
+			defer wmCleanup()
+			printPath = wmPath
+		}
 	}
 
 	// Handle even-reverse: reorder PDF pages for manual duplex (even pages
